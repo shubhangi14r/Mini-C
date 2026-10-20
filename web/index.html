@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiniC → WebAssembly</title>
+<style>
+  :root {
+    --bg: #051230; --panel: #0e1d45; --panel2: #0a1738; --line: #22305f;
+    --text: #c9cfe0; --dim: #8e98b8; --white: #ffffff;
+    --teal: #1fb5a8; --ok: #2fbf9b; --fail: #ff6b57; --warn: #f0a23b; --accent: #e8603c;
+    --mono: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+    --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+  body { min-height: 100vh; padding: 20px 24px 28px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 14px; }
+  h1 { margin: 0; font-size: 26px; font-weight: 600; color: var(--white); letter-spacing: .2px; }
+  .badge { font: 12px var(--mono); padding: 3px 9px; border: 1px solid var(--teal); color: var(--teal); border-radius: 999px; }
+  .sub { flex-basis: 100%; margin: 0; color: var(--dim); font-size: 14px; }
+
+  .pipeline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 12px 0 16px; }
+  .stage { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 8px;
+           background: var(--panel); border: 1px solid var(--line); font-size: 13px; }
+  .stage .ic { font-weight: 700; width: 16px; text-align: center; }
+  .stage .ms { color: var(--dim); font: 11px var(--mono); }
+  .stage.ok { border-color: var(--ok); } .stage.ok .ic { color: var(--ok); }
+  .stage.fail { border-color: var(--fail); } .stage.fail .ic { color: var(--fail); }
+  .stage.skipped { opacity: .55; }
+  .stage.idle .ic { color: var(--dim); }
+  .arrow { color: var(--dim); font-size: 14px; }
+
+  .grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 920px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--panel2); }
+  .bar .lbl { font: 12px var(--mono); color: var(--dim); letter-spacing: .5px; }
+  select, button { font: 14px var(--sans); border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 7px 10px; }
+  select { min-width: 0; max-width: 100%; }
+  button.run { background: var(--teal); border-color: var(--teal); color: #04211f; font-weight: 700; padding: 7px 18px; cursor: pointer; margin-left: auto; }
+  button.run:disabled { opacity: .6; cursor: wait; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
+  .hint { font-size: 12px; color: var(--dim); }
+
+  .editor { display: flex; height: 430px; font: 14px/21px var(--mono); }
+  .gutter { width: 46px; flex: none; overflow: hidden; background: var(--panel2); color: var(--dim); text-align: right; padding: 10px 8px 10px 0; user-select: none; border-right: 1px solid var(--line); }
+  .gutter div.err { color: #fff; background: var(--fail); }
+  textarea { flex: 1; resize: none; border: 0; outline: none; background: transparent; color: var(--white); padding: 10px 12px; font: inherit; tab-size: 4; white-space: pre; overflow: auto; }
+
+  .errbox { display: none; padding: 10px 14px; border-top: 1px solid var(--fail); background: #2a1020; color: #ffd4cd; font-size: 14px; }
+  .errbox.show { display: block; }
+  .errbox b { color: #fff; }
+  .errbox button { margin-left: 10px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+
+  .tabs { display: flex; gap: 4px; padding: 8px 10px 0; background: var(--panel2); border-bottom: 1px solid var(--line); }
+  .tab { border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; padding: 8px 14px; background: transparent; color: var(--dim); cursor: pointer; }
+  .tab[aria-selected="true"] { background: var(--panel); color: var(--white); border-color: var(--line); }
+  pre.pane { display: none; margin: 0; padding: 14px; height: 430px; overflow: auto; font: 13.5px/1.55 var(--mono); color: var(--text); white-space: pre; }
+  pre.pane.show { display: block; }
+  .nm { color: #8fd3ff; } .cf { color: #ffa07a; } .lc { color: #7fe3c3; } .op { color: #e6e8f2; } .num { color: #f0c674; }
+  .note { color: var(--dim); font-family: var(--sans); white-space: normal; line-height: 1.5; margin-bottom: 12px; display: block; }
+  .rterr { color: #ffb4a8; }
+
+  .stats { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel2); font-size: 13px; color: var(--dim); }
+  .stats b { color: var(--white); font-weight: 600; }
+  .verdict { margin-left: auto; font-weight: 700; }
+  .verdict.ok { color: var(--ok); } .verdict.fail { color: var(--fail); }
+  footer { margin-top: 18px; font-size: 12.5px; color: var(--dim); line-height: 1.6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MiniC → WebAssembly</h1>
+  <span class="badge">Review 1 · backend demo</span>
+  <p class="sub">A makeshift frontend (a tiny stand-in parser) feeds the real code generator, validator and runtime.</p>
+</header>
+
+<div class="pipeline" id="pipeline" aria-label="Compiler stages"></div>
+
+<main class="grid">
+  <section class="card" aria-label="Source code">
+    <div class="bar">
+      <span class="lbl">SOURCE</span>
+      <select id="examples" aria-label="Example programs"></select>
+      <span class="hint">Ctrl + Enter to run</span>
+      <button class="run" id="run">Run ▶</button>
+    </div>
+    <div class="editor">
+      <div class="gutter" id="gutter" aria-hidden="true"></div>
+      <textarea id="src" spellcheck="false" wrap="off" aria-label="MiniC source code"></textarea>
+    </div>
+    <div class="errbox" id="errbox" role="alert"></div>
+  </section>
+
+  <section class="card" aria-label="Results">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="output" aria-selected="true">Output</button>
+      <button class="tab" role="tab" data-tab="wat" aria-selected="false">WAT</button>
+      <button class="tab" role="tab" data-tab="ast" aria-selected="false">AST</button>
+      <button class="tab" role="tab" data-tab="bin" aria-selected="false">Binary</button>
+    </div>
+    <pre class="pane show" id="pane-output">Press Run to compile and execute the program.</pre>
+    <pre class="pane" id="pane-wat">The generated WebAssembly text appears here.</pre>
+    <pre class="pane" id="pane-ast">The syntax tree appears here.</pre>
+    <pre class="pane" id="pane-bin">The binary module appears here.</pre>
+    <div class="stats" id="stats">
+      <span>Instructions: <b id="st-instr">–</b></span>
+      <span>Binary: <b id="st-bytes">–</b></span>
+      <span>Total: <b id="st-ms">–</b></span>
+      <span class="verdict" id="verdict"></span>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Supported in this build: <code>int</code> variables and functions, <code>+ - * / %</code>, comparisons, <code>!</code>, <code>if / else</code>, <code>while</code>,
+  <code>return</code>, recursion, <code>print_int(...)</code>. Later phases add types, arrays, structs, strings and more.
+</footer>
+
+<script>
+"use strict";
+const EXAMPLES = [
+  { name: "Factorial (recursion)", code:
+`int fact(int n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * fact(n - 1);
+}
+
+void main() {
+    print_int(fact(5));
+}
+` },
+  { name: "Sum 1 to 10 (while)", code:
+`void main() {
+    int sum = 0;
+    int i = 1;
+    while (i <= 10) {
+        sum += i;
+        i++;
+    }
+    print_int(sum);
+}
+` },
+  { name: "Fibonacci 0 to 10", code:
+`int fib(int n) {
+    if (n < 2) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+void main() {
+    int i = 0;
+    while (i <= 10) {
+        print_int(fib(i));
+        i++;
+    }
+}
+` },
+  { name: "GCD (Euclid)", code:
+`int gcd(int a, int b) {
+    while (b != 0) {
+        int t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
+}
+
+void main() {
+    print_int(gcd(48, 18));
+}
+` },
+  { name: "Primes up to 30", code:
+`int isPrime(int n) {
+    if (n < 2) {
+        return 0;
+    }
+    int d = 2;
+    while (d * d <= n) {
+        if (n % d == 0) {
+            return 0;
+        }
+        d++;
+    }
+    return 1;
+}
+
+void main() {
+    int n = 2;
+    while (n <= 30) {
+        if (isPrime(n)) {
+            print_int(n);
+        }
+        n++;
+    }
+}
+` },
+  { name: "Collatz steps for 27", code:
+`int collatz(int n) {
+    int steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0) {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps++;
+    }
+    return steps;
+}
+
+void main() {
+    print_int(collatz(27));
+}
+` },
+  { name: "Error: undeclared variable", code:
+`void main() {
+    int total = 5;
+    print_int(totl);
+}
+` },
+  { name: "Error: missing return", code:
+`int sign(int x) {
+    if (x > 0) {
+        return 1;
+    }
+}
+
+void main() {
+    print_int(sign(3));
+}
+` },
+  { name: "Runtime trap: divide by zero", code:
+`void main() {
+    int zero = 0;
+    print_int(10 / zero);
+}
+` },
+];
+
+const STAGES = ["Parse", "Check", "Emit WAT", "Validate + encode", "Run"];
+const $ = id => document.getElementById(id);
+const src = $("src"), gutter = $("gutter"), errbox = $("errbox");
+let errLine = 0;
+
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function renderPipeline(stages) {
+  const parts = [];
+  STAGES.forEach((name, i) => {
+    const s = stages ? stages.find(x => x.name === name) : null;
+    const status = s ? s.status : "idle";
+    const icon = status === "ok" ? "✓" : status === "fail" ? "✗" : "–";
+    const ms = s && status !== "skipped" ? `<span class="ms">${s.ms < 10 ? s.ms.toFixed(1) : Math.round(s.ms)} ms</span>` : "";
+    parts.push(`<div class="stage ${status}"><span class="ic">${icon}</span>${esc(name)}${ms}</div>`);
+    if (i < STAGES.length - 1) parts.push('<span class="arrow">→</span>');
+  });
+  $("pipeline").innerHTML = parts.join("");
+}
+
+function renderGutter() {
+  const n = src.value.split("\n").length;
+  let h = "";
+  for (let i = 1; i <= n; i++) h += `<div${i === errLine ? ' class="err"' : ""}>${i}</div>`;
+  gutter.innerHTML = h;
+  gutter.scrollTop = src.scrollTop;
+}
+
+function highlightWat(text) {
+  return text.split("\n").map(line => {
+    let e = esc(line);
+    e = e.replace(/(\$[A-Za-z0-9_]+)/g, '<span class="nm">$1</span>');
+    e = e.replace(/^(\s*)(block|loop|if|else|end|br_if|br|return|call|unreachable)\b/, '$1<span class="cf">$2</span>');
+    e = e.replace(/^(\s*)(local\.get|local\.set|local\.tee|drop)\b/, '$1<span class="lc">$2</span>');
+    e = e.replace(/^(\s*)(i32\.[a-z_]+)(\s+-?\d+)?/, (m, a, b, c) => a + '<span class="op">' + b + "</span>" + (c ? '<span class="num">' + c + "</span>" : ""));
+    return e;
+  }).join("\n");
+}
+
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
+  ["output", "wat", "ast", "bin"].forEach(n => $("pane-" + n).classList.toggle("show", n === name));
+}
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab)));
+
+function setError(err) {
+  if (!err) { errbox.className = "errbox"; errbox.innerHTML = ""; errLine = 0; renderGutter(); return; }
+  errLine = err.line || 0;
+  const where = err.line ? `Line ${err.line}, column ${err.col}: ` : "";
+  const label = { lex: "Syntax error", parse: "Syntax error", check: "Error", backend: "Backend error", server: "Server error" }[err.stage] || "Error";
+  errbox.innerHTML = `<b>${label}</b> — ${esc(where + err.message)}` + (err.line ? ' <button id="goto" type="button">Go to line</button>' : "");
+  errbox.className = "errbox show";
+  renderGutter();
+  const g = $("goto");
+  if (g) g.addEventListener("click", () => gotoLine(err.line, err.col));
+}
+
+function gotoLine(line, col) {
+  const lines = src.value.split("\n");
+  let start = 0;
+  for (let i = 0; i < line - 1; i++) start += lines[i].length + 1;
+  const end = start + (lines[line - 1] || "").length;
+  src.focus();
+  src.setSelectionRange(start + Math.max(0, (col || 1) - 1), end);
+  src.scrollTop = Math.max(0, (line - 3) * 21);
+}
+
+function binaryPane(w) {
+  return '<span class="note">The first 8 bytes of every WebAssembly file are the magic number <b>00 61 73 6d</b> (the text “\\0asm”) followed by the version <b>01 00 00 00</b>. ' +
+    `This module is <b>${w.bytes} bytes</b> and passed validation before it was run.</span>` + esc(w.hex);
+}
+
+async function run() {
+  const btn = $("run");
+  btn.disabled = true; btn.textContent = "Running…";
+  setError(null);
+  const t0 = performance.now();
+  try {
+    const res = await fetch("/api/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: src.value }) });
+    const r = await res.json();
+    renderPipeline(r.stages);
+    if (r.error) setError(r.error);
+    // output pane
+    let out = "";
+    if (r.ok) out = r.output.length ? esc(r.output.join("\n")) : '<span class="note">(the program ran and printed nothing)</span>';
+    else if (r.error) out = '<span class="note">Nothing was run because the source has an error. See the message under the editor.</span>';
+    if (r.outputTruncated) out += '\n<span class="note">… output truncated to the first 1000 lines.</span>';
+    if (r.runtimeError) out = (r.output && r.output.length ? esc(r.output.join("\n")) + "\n\n" : "") + `<span class="rterr">⚠ ${esc(r.runtimeError)}</span>`;
+    $("pane-output").innerHTML = out;
+    $("pane-wat").innerHTML = r.wat ? highlightWat(r.wat) : "No WAT was generated.";
+    $("pane-ast").textContent = r.ast || "No syntax tree was produced.";
+    $("pane-bin").innerHTML = r.wasm ? binaryPane(r.wasm) : "No binary was produced.";
+    $("st-instr").textContent = r.instructions != null ? r.instructions : "–";
+    $("st-bytes").textContent = r.wasm ? r.wasm.bytes + " bytes" : "–";
+    $("st-ms").textContent = Math.round(performance.now() - t0) + " ms";
+    const v = $("verdict");
+    v.textContent = r.ok ? "✓ ran successfully" : r.error ? "✗ compile error" : "✗ runtime error";
+    v.className = "verdict " + (r.ok ? "ok" : "fail");
+    if (r.error) showTab("output"); 
+  } catch (e) {
+    renderPipeline(null);
+    $("pane-output").innerHTML = '<span class="rterr">Cannot reach the compiler server. Is it still running in your terminal?</span>';
+    showTab("output");
+  } finally {
+    btn.disabled = false; btn.textContent = "Run ▶";
+  }
+}
+
+// ---- wiring ----
+const sel = $("examples");
+EXAMPLES.forEach((ex, i) => { const o = document.createElement("option"); o.value = String(i); o.textContent = ex.name; sel.appendChild(o); });
+sel.addEventListener("change", () => { src.value = EXAMPLES[Number(sel.value)].code; setError(null); renderGutter(); });
+src.addEventListener("input", () => { errLine = 0; renderGutter(); try { localStorage.setItem("minic-src", src.value); } catch (e) {} });
+src.addEventListener("scroll", () => { gutter.scrollTop = src.scrollTop; });
+src.addEventListener("keydown", ev => {
+  if (ev.key === "Tab") {
+    ev.preventDefault();
+    const s = src.selectionStart, e = src.selectionEnd;
+    src.value = src.value.slice(0, s) + "    " + src.value.slice(e);
+    src.selectionStart = src.selectionEnd = s + 4;
+    src.dispatchEvent(new Event("input"));
+  } else if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
+    ev.preventDefault(); run();
+  }
+});
+$("run").addEventListener("click", run);
+
+let saved = null;
+try { saved = localStorage.getItem("minic-src"); } catch (e) {}
+src.value = saved && saved.trim() ? saved : EXAMPLES[0].code;
+renderPipeline(null);
+renderGutter();
+</script>
+</body>
+</html>

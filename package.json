@@ -1,0 +1,20 @@
+{
+  "name": "minic-wasm",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+  "test": "ts-node tests/codegen/run_tests.ts",
+  "emit": "ts-node src/cli/cli.ts"
+},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/node": "^26.6.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2",
+    "wabt": "^1.0.39"
+  }
+}
