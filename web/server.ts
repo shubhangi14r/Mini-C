@@ -1,4 +1,4 @@
-// Local web server that connects the browser UI to the real compiler backend:
+﻿// Local web server that connects the browser UI to the real compiler backend:
 //   source -> (makeshift parser) -> AST -> WatEmitter -> WAT -> WABT validate -> .wasm -> run
 // Run with:  npx ts-node web/server.ts      then open http://localhost:3000
 import http from "http";
@@ -7,7 +7,8 @@ import path from "path";
 import { Worker } from "worker_threads";
 import { inspect } from "util";
 import ts from "typescript";
-import { parseProgram, checkProgram, MiniCError } from "../src/frontend/mini_parser";
+import { parseProgram } from "../src/frontend/annanya/adapter";
+import { checkProgram, MiniCError } from "../src/frontend/mini_parser";
 import { WatEmitter } from "../src/codegen/wat_emitter";
 import { watToWasm } from "../src/codegen/wasm_tools";
 import { astToText } from "./ast_text";
@@ -170,3 +171,4 @@ server.listen(PORT, () => {
   console.log(`MiniC -> WebAssembly demo running at http://localhost:${PORT}`);
   console.log("Press Ctrl+C to stop.");
 });
+
